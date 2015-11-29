@@ -1,0 +1,529 @@
+<!doctype HTML>
+<html>
+<head>
+
+<title>WAVE DEFENDER</title>
+
+</head>
+
+<style>
+div {
+	position:absolute;
+}
+</style>
+
+<body>
+<h1 id="points_display">POINTS:  <h1>
+<h1 id="high_score_display">HIGH SCORE:   </h1>
+<br>
+<canvas id="game_screen" width="1200" height="800" style="border:1px solid #000000;"></canvas>
+<br>
+<div id="left_button" style=" border-radius: 25px;
+    background: #ffff00;
+    padding: 20px; 
+    width: 200px;
+    height: 150px;
+	left:0px">
+</div>
+<div id="shoot_button" style=" border-radius: 25px;
+    background: #ff6600;
+    padding: 20px; 
+    width: 700px;
+    height: 150px;
+	left: 250px">
+</div>
+<div id="right_button" style=" border-radius: 25px;
+    background: #ffff00;
+    padding: 20px; 
+    width: 200px;
+    height: 150px; 
+	left: 1000px">
+</div>
+</body>
+
+<script src="jquery.js"></script>
+<script src="hit_detector.js"></script>
+<script src="alien_defender_sound.js"></script>
+<script src="alien_obj_lib.js"></script>
+<script src="player_obj_lib.js"></script>
+<script src="item_obj_lib.js"></script>
+
+<script>
+
+// create global 2d context for canvas rendering
+
+var c = document.getElementById("game_screen");
+var ctx = c.getContext("2d");
+
+// draw welcome screen
+ctx.font = "30px Arial";
+ctx.fillStyle="black";
+ctx.fillText("            P KEY OR TAP SCREEN TO PLAY", 180, 150);
+ctx.fillText("ARROW KEYS OR PRESS YELLOW BUTTONS TO MOVE", 180, 200);
+ctx.fillText("   SPACEBAR OR ORANGE BUTTON TO SHOOT", 180, 350);
+ctx.fillText("   HEARTS INCREASE SPEED AND FIREPOWER", 180, 400);
+
+// set up game engine variables
+
+//  keeps all alien objects,  these are created from the alien_obj_lib
+var aliens = [];
+var items = [];
+
+//  this creates the active player object
+var player;
+
+// this array holds the active shots
+var shots = [];
+// these intervals control the pace of the game
+var gameInterval;
+var attackInterval;
+var itemInterval;
+var shotInterval;
+var secondwaveInterval;
+
+
+var game_status = "off";
+// the level variable determines the quantity of aliens sent at each levelup
+var level = 2;
+
+//  would love to have this retained as a cookie or server-side storage
+var high_score = 1000;
+
+//  this controls how many simultaneous shots the player can have on screen
+
+
+
+//  background rendering 
+
+// I could have the freshBackground function mutable from a series of functions to set different
+// level backgrounds
+
+function freshBackground() {
+	ctx.beginPath();
+	ctx.fillStyle="white";
+	ctx.fillRect(0,0,1200,720);
+	ctx.stroke();
+	ctx.beginPath();
+	ctx.strokeStyle="green";
+	ctx.lineWidth="5";
+	ctx.fillStyle="green";	
+	ctx.fillRect(0,720,1200,80);
+	ctx.stroke();
+	drawMountain(50,720);
+	drawMountain(502,720);
+
+}
+
+function drawMountain(x,y) {
+	
+	var x = x;
+	var y = y;
+	
+	
+	var gradient = ctx.createLinearGradient(0,0, 1500, 200);
+	
+	gradient.addColorStop(0,"green");
+	gradient.addColorStop(1,"white");
+	
+	
+	ctx.beginPath();
+	ctx.moveTo(x,y);
+	ctx.lineWidth = 5;
+	ctx.strokeStyle = "black";
+	ctx.lineTo(x + 50, y - 45);
+	ctx.lineTo(x +160, y - 50);
+	ctx.lineTo(x + 170, y - 60);
+	ctx.lineTo(x + 260, y);
+	ctx.lineTo(x,y);
+	ctx.fillStyle = gradient;
+	ctx.fill();
+	ctx.stroke();
+
+};
+
+//  this is the core game engine
+//  it requires the above global variables
+
+function randomNumber(min_range, max_range) {
+	return Math.floor((Math.random() * max_range) + min_range);
+}
+
+function randomColor() {
+	color_code = randomNumber(0,5);
+	if (color_code == 0) {return "red"};
+	if (color_code == 1) {return "blue"};
+	if (color_code == 2) {return "green"};
+	if (color_code == 3) {return "yellow"};
+	if (color_code == 4) {return "purple"};
+	if (color_code == 5) {return "orange"};
+}
+
+function levelUp() {
+	level++;
+	clearInterval(attackInterval);
+	attackInterval = setInterval(levelUp, 15000 - (level * 250));
+	if (level % 5 === 0 || player.maxshots * 3 < level) {
+	//	clearInterval(itemInterval);
+		itemInterval = setTimeout(newItems, 5000+(level*200));
+	};
+	
+	//create basic aliens
+	for (i = 0; i < level ;  i++) {
+		color_name = randomColor();
+		size = randomNumber(20,70);
+		horizontal_distance = randomNumber(25,200);
+		vertical_distance = randomNumber(20,40);
+		aliens[aliens.length] = new alien_obj(i * 120 + 80 ,20, color_name, size, horizontal_distance , vertical_distance);
+	};	
+	//create triangles every two levels
+	if (level % 2 === 0 || level > 10) {
+		size = randomNumber(40,70);
+		for (i = 0; i < level / 2 ; i++) {
+			aliens[aliens.length] = new triangle_obj(i * 120 + 80 ,20 + (level * 2), color_name, size, horizontal_distance , vertical_distance);
+		}
+		
+		if (level > 8) {
+			secondwaveInterval = setTimeout (function() {
+				size = randomNumber(40,70);
+				color_name = randomColor();
+				for (i = 0; i < level / 3 ; i++) {
+					aliens[aliens.length] = new triangle_obj(1000 - i * 120 ,20 + (level * 4), color_name, size, horizontal_distance , vertical_distance);
+				};
+			}, 4000);
+		};
+	}	
+	// create flowers every 3 levels after first 3
+	if (level > 10 || level % 8 === 0) {
+		size = randomNumber(50,80);
+		var flower_count = level - 7;
+		if (flower_count > 10) {
+			flower_count = 10;
+		};
+		for (i = 0; i < flower_count; i = i + 1) {
+			color_name = randomColor();
+			aliens[aliens.length] = new flower_obj(1100 - (i* 120), 10 + (level * 5), color_name, size);		
+		};
+	};
+}
+
+function game_over() {
+	// stop game
+	clearInterval(gameInterval);
+	// draw game over screen
+	ctx.beginPath();
+	ctx.fillStyle="red";
+	ctx.fillRect(0,0,1200,720);
+	ctx.stroke();
+	ctx.beginPath();
+	ctx.strokeStyle="red";
+	ctx.lineWidth="5";
+	ctx.fillStyle="green";	
+	ctx.fillRect(0,720,1200,80);
+	ctx.stroke();
+	ctx.fillText(" GAME OVER.  TYPE P OR TAP SCREEN TO PLAY AGAIN.  ", 250,250);
+	ctx.strokeStyle="black";
+	ctx.lineWidth="400";
+	ctx.stroke();
+	game_over_sound();
+	game_status = "off";
+	// update high score if necessary
+	if (points > high_score) {
+		high_score = points;
+		$("#high_score_display").text("High Score:  " + high_score);
+	};
+}
+
+function gameLoop() {
+	// refresh game screen
+	freshBackground();
+	// draw player object
+	player.draw();
+	// draw all alien objects
+	for (i = 0; i < aliens.length; i++) {
+		aliens[i].draw();
+		aliens[i].move();  
+	};
+	// draw all shot objects
+	for (i = 0; i < shots.length; i++) {
+		shots[i].draw();
+		shots[i].move();
+	};
+	//  draw all items
+	for (i=0; i <items.length; i++) {
+		items[i].draw();
+		items[i].move();
+	};
+	// check for hits
+	hitDetection();
+
+}
+
+
+function gameStart() {
+	//initialize game engine variables
+	clearInterval(gameInterval);
+	clearInterval(attackInterval);
+	clearInterval(itemInterval);
+	clearInterval(secondwaveInterval);
+	items.length = 0;
+	aliens.length = 0; 
+	shots.length = 0;
+	level = 4;
+	points = 0;
+	game_status = "on";	
+	$("#high_score_display").text("High Score:  " + high_score);
+	//create first wave of basic aliens
+	for (i = 0; i < 5; i++) {
+		aliens[i] = new alien_obj(i * 140 + 300 ,120, "green", 60,50, 10);
+	};
+	// create player object
+	player = new player_obj(400,700);
+	
+
+	//  set refresh rate of game loop
+	gameInterval = setInterval(gameLoop, 30);
+}
+
+function hitDetection() {
+	// this requires the hit_detector.js script to be loaded to enable hitCheck function
+	//  hitCheck function returns true if two squares are sharing the same space based on two sets of x y coordinates and side lengths
+	
+	for (i = 0; i < items.length; i++) {	
+		if (hitCheck(items[i].x, items[i].y, 50, player.x, player.y, 50)) {
+			items.shift();
+			//  begin power up			
+			player.maxshots = player.maxshots + 1;
+			player.speed = player.speed+1;
+			player.color = "blue";
+			player.draw = function() {
+				
+				ctx.beginPath();
+				ctx.fillStyle=this.color;
+				ctx.fillRect( this.x ,this.y , 40 ,10 );
+				ctx.fillRect( this.x ,this.y - 5 , 5 ,5 );
+				ctx.fillRect( this.x + 15 ,this.y - 15 , 10 ,15 );
+				ctx.fillRect( this.x + 35 ,this.y - 5 , 5 ,5 );
+				ctx.fillRect( this.x-(this.maxshots * 2),this.y, 40 + (this.maxshots *4),10);
+				ctx.stroke();
+			};
+			
+			
+			
+// item catch sound sequence
+// definitely move			
+			hit_sound(1600);
+			hit_sound(1950);
+			
+			for (i =0; i < 20; i++) {
+				setTimeout(function() {
+					freq = i
+					triangle_sound(1800+ freq);
+				}, 100 + (i * 50))
+			};
+			for (i =0; i < player.maxshots * 10; i++) {
+				setTimeout(function() {
+					freq = i
+					triangle_sound(1940+ freq);
+				}, 200 + (i * 50))
+			};	
+
+			break
+		
+		};
+	};
+	
+	
+	// cycle through each alien
+	for (i = 0; i < aliens.length; i++) {
+		// check if alien has reached the surface
+		if (aliens[i].y == 700) {
+			game_over();
+		};
+		//  cycle through all shots
+		for (j = 0; j < shots.length; j++) {
+			//remove shot if it is past the top of the screen
+			if (shots[j].y <= 0) {
+				shots.shift();
+			};
+			// check if shot has collided with alien
+			if (hitCheck(aliens[i].x, aliens[i].y, aliens[i].size, shots[j].x, shots[j].y, 5)){
+				//play sound based on id of alien
+				if (aliens[i].id == "triangle"){
+					triangle_sound(2000 - aliens[i].size * 25);
+				} else if (aliens[i].id == "flower"){
+					flower_sound(2000 - aliens[i].size * 25);
+				} else {
+					hit_sound((2000 - aliens[i].size * 25));
+				};
+				// remove alien
+				aliens.splice(i,1);
+				// remove shot
+				shots.splice(j,1);
+				//add points
+				points = points + 100;
+				$("#points_display").text("POINTS:  " + points);
+				//level up if there are no aliens left
+				if (aliens.length == 0) {
+					levelUp();
+				};
+				break;
+			};
+		};
+	};
+}	
+
+
+//easter eggs
+
+function makePlayerHeart(){
+	player.draw = function(){
+		ctx.beginPath();
+		ctx.fillStyle="red";
+		ctx.fillRect(this.x, this.y, 35, 15);
+		ctx.fillRect(this.x+5, this.y, 25, 30);
+		ctx.fillRect(this.x + 5, this.y-5, 10, 5);
+		ctx.fillRect(this.x + 20, this.y - 5, 10, 5);
+		ctx.fillRect(this.x + 30, this.y, 5, 15);
+		ctx.fillRect(this.x + 15, this.y + 35, 5, 5);
+		ctx.fillRect(this.x + 10, this.y + 30, 15, 5);
+		ctx.stroke();
+	};
+}
+
+function aliensToTriangle(){
+	for (i = 0; i < aliens.length; i = i + 1) {
+		aliens[i].draw = function(){
+			ctx.beginPath();
+			ctx.fillStyle=this.color;
+			ctx.moveTo( this.x + (this.size * 1)/8 , this.y + (this.size * 1)/8);
+			ctx.lineTo( this.x + (this.size * 7)/8 , this.y + (this.size * 1)/8);
+			ctx.lineTo( this.x + (this.size * 4)/8 , this.y + (this.size * 7)/8);
+			ctx.lineTo( this.x + (this.size * 1)/8 , this.y + (this.size * 1)/8);
+			ctx.fill();
+			ctx.stroke();
+		}
+	};
+
+}
+
+function aliensToFlower(){
+	for (i = 0; i < aliens.length; i = i + 1) {
+		aliens[i].draw = function(){
+			ctx.beginPath();
+			ctx.fillStyle=this.color;
+			ctx.fillRect( this.x + (this.size * 3)/8 , this.y + (this.size * 2)/8 , (this.size * 1) / 8 , (this.size * 1) /8 );
+			ctx.fillRect( this.x + (this.size * 1)/8 , this.y + (this.size * 3)/8 , (this.size * 5) / 8 , (this.size * 1) /8 );
+			ctx.fillRect( this.x + (this.size * 2)/8 , this.y + (this.size * 4)/8 , (this.size * 3) / 8 , (this.size * 1) /8 );
+			ctx.fillRect( this.x + (this.size * 1)/8 , this.y + (this.size * 5)/8 , (this.size * 5) / 8 , (this.size * 1) /8 );
+			ctx.fillRect( this.x + (this.size * 2)/8 , this.y + (this.size * 6)/8 , (this.size * 1) / 8 , (this.size * 1) /8 );
+			ctx.fillRect( this.x + (this.size * 4)/8 , this.y + (this.size * 6)/8 , (this.size * 1) / 8 , (this.size * 1) /8 );
+			ctx.stroke();
+		}
+	};
+}
+
+
+//end easter eggs
+
+
+// game controls
+$(document).ready(function(){
+
+
+	// functional on touch screen or with keyboard
+	
+	// the moveInterval sets how fast the player moves when a button is held down
+	var moveInterval;
+
+	// begin keyboard controls
+	
+	// this variable keeps track of if a key has been pressed down,  this avoids repeated presses being triggered by the OS
+	var keydownstate = {};
+
+	$(document).keydown(function(event) {
+
+		if ( event.which == 37 ) { // left arrow 
+			if (keydownstate[37] == null) {
+				clearInterval(moveInterval);
+				moveInterval = setInterval(function(){ player.moveLeft();}, 25);
+				keydownstate[37] = true;
+			};
+			
+		} else if ( event.which == 39) {  //right arrow
+			if (keydownstate[39] == null) {
+				clearInterval(moveInterval);
+				moveInterval = setInterval(function(){ player.moveRight();}, 25);
+				keydownstate[39] == true;
+			};
+		} else if (event.which == 32 ){ //space bar
+			if (keydownstate[32] == null) {
+				clearInterval(shotInterval);
+				shotInterval = setInterval(function(){ newShot();},90);
+			};
+		} else if (event.which == 80 && game_status != "on") { // letter p
+			gameStart();
+		} else if (event.which == 72){ //letter h
+			makePlayerHeart();
+		} else if (event.which == 84) { //letter t
+			aliensToTriangle();
+		} else if (event.which == 70) { //letter a
+			aliensToFlower();
+		};
+	});
+	
+	$(document).keyup(function(event) {
+		var keycode = event.which;
+		if ( keycode == 37 ) { // left arrow 
+			clearInterval(moveInterval);
+			keydownstate[keycode] = null;
+		} else if ( keycode == 39) {  //right arrow
+			clearInterval(moveInterval);
+			keydownstate[keycode] = null;
+		} else if (keycode == 32 ){ //space bar
+			clearInterval(shotInterval);
+			keydownstate[keycode] = null;
+		};
+	});
+	
+// end keyboard controls
+	
+// begin touch controls
+	$("#game_screen").on("touchstart", function() {
+		if (game_status != "on") {
+			gameStart();
+		}
+	});
+	
+	$("#left_button").on("touchstart", function(event){
+		event.preventDefault();
+		clearInterval(moveInterval);
+		moveInterval = setInterval(function(){ player.moveLeft();}, 30);
+	});
+	$("#left_button").on("touchend", function(event){
+		event.preventDefault();
+		clearInterval(moveInterval);
+	});
+	$("#right_button").on("touchstart", function(event){
+		event.preventDefault();
+		clearInterval(moveInterval);
+		moveInterval = setInterval(function(){ player.moveRight();}, 30);
+	});
+	$("#right_button").on("touchend", function(event){
+		event.preventDefault();
+		clearInterval(moveInterval);
+	});
+	$("#shoot_button").on("touchstart", function(event){
+		event.preventDefault();
+		shotInterval = setInterval(function(){ newShot();}, 90);
+
+	});
+	$("#shoot_button").on("touchend", function(event){
+		event.preventDefault();
+		clearInterval(shotInterval);
+
+	});
+// end touch controls
+});
+// end game controls
+</script>
+</html>
